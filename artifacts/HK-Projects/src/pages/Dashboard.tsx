@@ -57,9 +57,28 @@ interface EtherealAccountData {
   }>;
 }
 
+interface GrvtAccountData {
+  hasCredentials: boolean;
+  isConnected: boolean;
+  network?: string;
+  walletAddress?: string | null;
+  subAccountId?: string | null;
+  balances: Array<{ currency: string; balance: string; index_price: string }>;
+  positions: Array<{
+    instrument: string;
+    size: string;
+    entry_price: string;
+    mark_price: string;
+    unrealized_pnl: string;
+    realized_pnl: string;
+    total_pnl: string;
+  }>;
+  error?: string;
+}
+
 interface UnifiedLog {
   key: string;
-  exchange: "lighter" | "extended" | "ethereal";
+  exchange: "lighter" | "extended" | "ethereal" | "grvt";
   strategyName: string | null;
   level: string;
   message: string;
@@ -184,6 +203,247 @@ function useEtherealMarkets() {
       .catch(() => setData({}));
   }, []);
   return data;
+}
+
+// ── GRVT Hooks ────────────────────────────────────────────────────────────────
+
+function useGrvtStrategies() {
+  const [data, setData] = useState<{ id: number; name: string; type: string; marketSymbol: string; isRunning: boolean }[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch("/api/grvt/strategies", { credentials: "include" })
+      .then(r => r.ok ? r.json() : { strategies: [] })
+      .then(json => setData(Array.isArray(json) ? json : (json.strategies ?? [])))
+      .catch(() => setData([]))
+      .finally(() => setLoading(false));
+  }, []);
+  return { data, loading };
+}
+
+function useGrvtAccount() {
+  const [data, setData] = useState<GrvtAccountData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const fetchData = () => {
+    fetch("/api/grvt/strategies/account", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => setData(json))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  return { data, loading };
+}
+
+function useGrvtLogs(limit = 8) {
+  const [data, setData] = useState<Array<{ id: number; strategyName: string | null; level: string; message: string; details: string | null; createdAt: string }> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const fetchLogs = () => {
+    fetch(`/api/grvt/strategies/logs/recent?limit=${limit}`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then(json => setData(Array.isArray(json) ? json : (json.logs ?? [])))
+      .catch(() => setData([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
+  }, [limit]);
+  return { data, loading };
+}
+
+// ── GRVT Section ──────────────────────────────────────────────────────────────
+
+function GrvtSection({
+  strategies,
+  loadingStrategies,
+  account,
+  loadingAccount,
+}: {
+  strategies: { id: number; name: string; type: string; marketSymbol: string; isRunning: boolean }[] | null;
+  loadingStrategies: boolean;
+  account: GrvtAccountData | null;
+  loadingAccount: boolean;
+}) {
+  const grvtRunning = strategies?.filter(s => s.isRunning) ?? [];
+  const grvtTotal = strategies?.length ?? 0;
+  const notConfigured = !loadingAccount && account !== null && !account.hasCredentials;
+  const positions = (account?.positions ?? []).filter(p => parseFloat(p.size || "0") !== 0);
+  const totalBalance = (account?.balances ?? []).reduce((sum, b) => sum + parseFloat(b.balance || "0"), 0);
+  const totalPnl = positions.reduce((sum, p) => sum + parseFloat(p.unrealized_pnl || "0"), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <ExchangeLogo exchange="grvt" size={18} />
+        <h2 className="text-lg font-semibold text-foreground">GRVT DEX</h2>
+        {account?.network && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono">
+            {account.network}
+          </span>
+        )}
+        <Link
+          href="/grvt"
+          className="ml-auto text-sm text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+        >
+          Kelola <ExternalLink className="w-3 h-3" />
+        </Link>
+      </div>
+
+      {notConfigured ? (
+        <Card className="glass-panel border-cyan-500/10">
+          <CardContent className="py-6">
+            <div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
+              <Zap className="w-8 h-8 text-cyan-400 opacity-30" />
+              <p className="text-sm">Kredensial GRVT belum dikonfigurasi.</p>
+              <Link href="/settings" className="text-cyan-400 hover:underline text-sm">
+                Konfigurasi sekarang →
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="glass-panel hover:-translate-y-1 transition-transform duration-300 border-cyan-500/10">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Bot GRVT Aktif</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center">
+                  <Activity className="w-4 h-4 text-cyan-400" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingStrategies ? (
+                  <div className="h-8 w-16 bg-muted animate-pulse rounded" />
+                ) : (
+                  <div className="text-2xl font-bold text-foreground font-mono">
+                    {grvtRunning.length}{" "}
+                    <span className="text-muted-foreground text-sm font-sans font-normal">/ {grvtTotal}</span>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">Strategi dikonfigurasi</p>
+              </CardContent>
+            </Card>
+
+            <Card className="glass-panel hover:-translate-y-1 transition-transform duration-300 border-cyan-500/10">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Balance GRVT</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center">
+                  <Wallet className="w-4 h-4 text-cyan-400" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingAccount ? (
+                  <div className="h-8 w-24 bg-muted animate-pulse rounded" />
+                ) : account?.balances && account.balances.length > 0 ? (
+                  <>
+                    <PriceDisplay value={totalBalance} format="currency" colored={false} className="text-2xl font-bold text-foreground" />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {account.balances.map(b => b.currency).join(", ")}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">—</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="glass-panel hover:-translate-y-1 transition-transform duration-300 border-cyan-500/10">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Posisi GRVT</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center">
+                  <ArrowRightLeft className="w-4 h-4 text-cyan-400" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingAccount ? (
+                  <div className="h-8 w-16 bg-muted animate-pulse rounded" />
+                ) : (
+                  <div className="text-2xl font-bold text-foreground font-mono">{positions.length}</div>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">Posisi terbuka</p>
+              </CardContent>
+            </Card>
+
+            <Card className="glass-panel hover:-translate-y-1 transition-transform duration-300 border-cyan-500/10">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">PnL Belum Terealisasi</CardTitle>
+                <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center">
+                  <TrendingUp className="w-4 h-4 text-cyan-400" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingAccount ? (
+                  <div className="h-8 w-24 bg-muted animate-pulse rounded" />
+                ) : positions.length > 0 ? (
+                  <PriceDisplay value={totalPnl} format="currency" showIcon className="text-2xl font-bold" />
+                ) : (
+                  <p className="text-sm text-muted-foreground">—</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">Dari posisi terbuka</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Posisi terbuka GRVT */}
+          <Card className="glass-panel border-cyan-500/10">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ExchangeLogo exchange="grvt" size={14} />
+                Posisi Terbuka GRVT
+              </CardTitle>
+              <CardDescription>Eksposur risiko di GRVT DEX</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loadingAccount ? (
+                <div className="space-y-4">
+                  {[1, 2].map(i => <div key={i} className="h-12 bg-muted animate-pulse rounded-lg" />)}
+                </div>
+              ) : positions.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground flex flex-col items-center">
+                  <AlertTriangle className="w-8 h-8 mb-2 opacity-20" />
+                  <p>Tidak ada posisi terbuka di GRVT.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {positions.map(pos => {
+                    const pnl = parseFloat(pos.unrealized_pnl || "0");
+                    const size = parseFloat(pos.size || "0");
+                    const isLong = size > 0;
+                    return (
+                      <div key={pos.instrument} className="flex items-center justify-between p-3 rounded-lg bg-background border border-border/50 hover:border-cyan-500/30 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className={`px-2 py-1 rounded text-xs font-bold ${isLong ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive"}`}>
+                            {isLong ? "LONG" : "SHORT"}
+                          </div>
+                          <div>
+                            <div className="font-bold text-foreground font-mono">{pos.instrument}</div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              Size: {pos.size} @ ${parseFloat(pos.entry_price).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <PriceDisplay value={pnl} format="currency" showIcon />
+                          <div className="text-xs text-muted-foreground font-mono">
+                            Mark: ${parseFloat(pos.mark_price).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ── Ethereal Section ──────────────────────────────────────────────────────────
@@ -571,6 +831,9 @@ export default function Dashboard() {
   const { data: ethAccount, loading: loadingEthAccount } = useEtherealAccount();
   const { data: ethLogs, loading: loadingEthLogs } = useEtherealLogs(8);
   const ethMarketsMap = useEtherealMarkets();
+  const { data: grvtStrategies, loading: loadingGrvtStrategies } = useGrvtStrategies();
+  const { data: grvtAccount, loading: loadingGrvtAccount } = useGrvtAccount();
+  const { data: grvtLogs, loading: loadingGrvtLogs } = useGrvtLogs(8);
 
   const activeStrategies = strategiesData?.strategies?.filter(s => s.isActive) || [];
   const runningStrategies = strategiesData?.strategies?.filter(s => s.isRunning) || [];
@@ -580,8 +843,8 @@ export default function Dashboard() {
   const isExpiringSoon = daysLeft !== null && daysLeft <= 7;
   const isExpired = daysLeft !== null && daysLeft <= 0;
 
-  // Gabungkan log Lighter + Extended + Ethereal, urutkan dari terbaru, ambil 10 teratas
-  const loadingCombinedLogs = loadingLighterLogs || loadingExtLogs || loadingEthLogs;
+  // Gabungkan log Lighter + Extended + Ethereal + GRVT, urutkan dari terbaru, ambil 10 teratas
+  const loadingCombinedLogs = loadingLighterLogs || loadingExtLogs || loadingEthLogs || loadingGrvtLogs;
   const combinedLogs = useMemo<UnifiedLog[]>(() => {
     const lighter: UnifiedLog[] = (logsData?.logs ?? [])
       .map((l, i) => ({
@@ -611,10 +874,19 @@ export default function Dashboard() {
       details: l.details ?? null,
       createdAt: l.createdAt,
     }));
-    return [...lighter, ...extended, ...ethereal]
+    const grvt: UnifiedLog[] = (grvtLogs ?? []).map((l, i) => ({
+      key: `grvt-${l.id ?? i}`,
+      exchange: "grvt" as const,
+      strategyName: l.strategyName ?? null,
+      level: l.level,
+      message: l.message,
+      details: l.details ?? null,
+      createdAt: l.createdAt,
+    }));
+    return [...lighter, ...extended, ...ethereal, ...grvt]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10);
-  }, [logsData, extLogs, ethLogs]);
+  }, [logsData, extLogs, ethLogs, grvtLogs]);
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500">
@@ -777,6 +1049,16 @@ export default function Dashboard() {
         />
       </section>
 
+      {/* ── GRVT Section ─────────────────────────────────────────────────────── */}
+      <section>
+        <GrvtSection
+          strategies={grvtStrategies}
+          loadingStrategies={loadingGrvtStrategies}
+          account={grvtAccount}
+          loadingAccount={loadingGrvtAccount}
+        />
+      </section>
+
       {/* ── Aktivitas Terbaru (gabungan semua DEX) ────────────────────────────── */}
       <section>
         <Card className="glass-panel border-border/50">
@@ -790,7 +1072,7 @@ export default function Dashboard() {
                     Live
                   </span>
                 </div>
-                <CardDescription>Log terkini dari semua bot — Lighter, Extended &amp; Ethereal</CardDescription>
+                <CardDescription>Log terkini dari semua bot — Lighter, Extended, Ethereal &amp; GRVT</CardDescription>
               </div>
             </div>
             <Link href="/logs" className="text-sm text-primary hover:text-primary/80">Lihat semua</Link>
@@ -823,7 +1105,7 @@ export default function Dashboard() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline gap-2">
                         <span className="font-medium text-foreground truncate">
-                          {log.strategyName || (log.exchange === "lighter" ? "Sistem Lighter DEX" : log.exchange === "ethereal" ? "Sistem Ethereal DEX" : "Sistem Extended")}
+                          {log.strategyName || (log.exchange === "lighter" ? "Sistem Lighter DEX" : log.exchange === "ethereal" ? "Sistem Ethereal DEX" : log.exchange === "grvt" ? "Sistem GRVT DEX" : "Sistem Extended")}
                         </span>
                         <span className="text-xs text-muted-foreground shrink-0 font-mono">
                           {formatWIBTime(log.createdAt)}

@@ -241,7 +241,15 @@ export default function Logs() {
                   size="sm"
                   className={`h-6 px-2 text-[10px] font-mono ${
                     exchangeFilter === f.value
-                      ? "bg-white/15 text-foreground"
+                      ? f.value === "grvt"
+                        ? "bg-cyan-500/15 text-cyan-400"
+                        : f.value === "ethereal"
+                        ? "bg-purple-500/15 text-purple-400"
+                        : f.value === "extended"
+                        ? "bg-violet-500/15 text-violet-400"
+                        : f.value === "lighter"
+                        ? "bg-blue-500/15 text-blue-400"
+                        : "bg-white/15 text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                   onClick={() => setExchangeFilter(f.value)}
