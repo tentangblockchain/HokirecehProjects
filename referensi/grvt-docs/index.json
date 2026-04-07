@@ -1,0 +1,113 @@
+{
+  "generated": "2026-04-07T15:11:00.677Z",
+  "source": "https://api-docs.grvt.io",
+  "engine": "MkDocs Material",
+  "successful": 10,
+  "failed": 0,
+  "openApiSpec": false,
+  "note": "api-docs.grvt.io dilindungi Cloudflare. Jika fetch gagal, file placeholder dibuat dengan URL referensi.",
+  "sections": {
+    "overview": {
+      "url": "https://api-docs.grvt.io/",
+      "file": "docs/overview.md",
+      "label": "GRVT API Overview"
+    },
+    "learn": {
+      "url": "https://api-docs.grvt.io/learn/",
+      "file": "docs/learn.md",
+      "label": "Learn — Konsep Dasar & Auth"
+    },
+    "api-setup": {
+      "url": "https://api-docs.grvt.io/api_setup/",
+      "file": "docs/api-setup.md",
+      "label": "API Setup"
+    },
+    "market-data-api": {
+      "url": "https://api-docs.grvt.io/market_data_api/",
+      "file": "docs/market-data-api.md",
+      "label": "Market Data REST API"
+    },
+    "market-data-streams": {
+      "url": "https://api-docs.grvt.io/market_data_streams/",
+      "file": "docs/market-data-streams.md",
+      "label": "Market Data Streams (WebSocket)"
+    },
+    "trading-api": {
+      "url": "https://api-docs.grvt.io/trading_api/",
+      "file": "docs/trading-api.md",
+      "label": "Trading REST API"
+    },
+    "trading-streams": {
+      "url": "https://api-docs.grvt.io/trading_streams/",
+      "file": "docs/trading-streams.md",
+      "label": "Trading Streams (WebSocket)"
+    },
+    "referral-data": {
+      "url": "https://api-docs.grvt.io/referral_data/",
+      "file": "docs/referral-data.md",
+      "label": "Referral Data"
+    },
+    "grvt-strategies": {
+      "url": "https://api-docs.grvt.io/grvt_strategies/",
+      "file": "docs/grvt-strategies.md",
+      "label": "GRVT Strategies"
+    },
+    "builder-codes": {
+      "url": "https://api-docs.grvt.io/builder_codes/",
+      "file": "docs/builder-codes.md",
+      "label": "Builder Codes"
+    }
+  },
+  "docs": [
+    {
+      "label": "GRVT API Overview",
+      "url": "https://api-docs.grvt.io/",
+      "file": "docs/overview.md"
+    },
+    {
+      "label": "Learn — Konsep Dasar & Auth",
+      "url": "https://api-docs.grvt.io/learn/",
+      "file": "docs/learn.md"
+    },
+    {
+      "label": "API Setup",
+      "url": "https://api-docs.grvt.io/api_setup/",
+      "file": "docs/api-setup.md"
+    },
+    {
+      "label": "Market Data REST API",
+      "url": "https://api-docs.grvt.io/market_data_api/",
+      "file": "docs/market-data-api.md"
+    },
+    {
+      "label": "Market Data Streams (WebSocket)",
+      "url": "https://api-docs.grvt.io/market_data_streams/",
+      "file": "docs/market-data-streams.md"
+    },
+    {
+      "label": "Trading REST API",
+      "url": "https://api-docs.grvt.io/trading_api/",
+      "file": "docs/trading-api.md"
+    },
+    {
+      "label": "Trading Streams (WebSocket)",
+      "url": "https://api-docs.grvt.io/trading_streams/",
+      "file": "docs/trading-streams.md"
+    },
+    {
+      "label": "Referral Data",
+      "url": "https://api-docs.grvt.io/referral_data/",
+      "file": "docs/referral-data.md"
+    },
+    {
+      "label": "GRVT Strategies",
+      "url": "https://api-docs.grvt.io/grvt_strategies/",
+      "file": "docs/grvt-strategies.md"
+    },
+    {
+      "label": "Builder Codes",
+      "url": "https://api-docs.grvt.io/builder_codes/",
+      "file": "docs/builder-codes.md"
+    }
+  ]
+}
