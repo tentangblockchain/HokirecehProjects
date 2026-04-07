@@ -237,16 +237,11 @@ export default function GrvtStrategies() {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-purple-400" />
-            <h1 className="text-xl font-bold">GRVT DEX</h1>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
-              PERPETUAL
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Manajemen bot trading otomatis untuk GRVT Exchange
-          </p>
+          <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <Zap className="w-8 h-8 text-cyan-400" />
+            Strategi GRVT
+          </h1>
+          <p className="text-muted-foreground mt-1">Bot trading otomatis di GRVT DEX</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -282,20 +277,26 @@ export default function GrvtStrategies() {
       </div>
 
       {/* ── Status credential ────────────────────────────────────────────────── */}
-      {!credentials.hasCredentials && (
-        <div className="border border-purple-500/20 bg-purple-500/5 rounded-xl p-4 text-sm">
-          <p className="font-semibold text-purple-400 mb-1">Belum Terkonfigurasi</p>
-          <p className="text-muted-foreground">
-            Tambahkan API Key atau Private Key GRVT untuk mulai trading.{" "}
-            <button
-              onClick={() => setShowConfig(true)}
-              className="underline text-purple-400 hover:text-purple-300"
-            >
-              Konfigurasi sekarang
-            </button>
-          </p>
-        </div>
-      )}
+      <div
+        className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm w-fit ${
+          credentials.hasCredentials
+            ? "bg-cyan-500/5 border-cyan-500/20"
+            : "bg-muted border-border"
+        }`}
+      >
+        <Zap className="w-3.5 h-3.5 text-cyan-400" />
+        <span className="text-cyan-300 font-medium">GRVT DEX</span>
+        {credentials.hasCredentials ? (
+          <span className="text-green-400 font-medium">aktif ✓</span>
+        ) : (
+          <button
+            className="text-yellow-400 font-medium hover:underline"
+            onClick={() => setShowConfig(true)}
+          >
+            belum dikonfigurasi
+          </button>
+        )}
+      </div>
 
       {credentials.hasCredentials && (
         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -328,20 +329,12 @@ export default function GrvtStrategies() {
           Memuat strategies...
         </div>
       ) : strategies.length === 0 ? (
-        <div className="text-center py-12 border border-dashed border-border/50 rounded-xl">
-          <BarChart2 className="w-10 h-10 mx-auto text-muted-foreground/40 mb-3" />
-          <p className="text-muted-foreground font-medium">Belum ada strategy GRVT</p>
-          <p className="text-muted-foreground/60 text-sm mt-1">
-            Klik "Buat Strategy" untuk memulai bot trading
+        <div className="text-center py-20 bg-card rounded-2xl border border-border flex flex-col items-center">
+          <Zap className="w-16 h-16 text-cyan-400 mb-4 opacity-20" />
+          <h3 className="text-xl font-bold text-foreground">Belum Ada Strategi GRVT</h3>
+          <p className="text-muted-foreground mt-2 max-w-md mx-auto">
+            Kamu belum membuat bot GRVT. Klik "Buat Strategy" untuk membuat DCA atau Grid bot di GRVT DEX.
           </p>
-          <Button
-            size="sm"
-            onClick={() => setShowCreate(true)}
-            className="mt-4 bg-purple-600 hover:bg-purple-700 text-white"
-          >
-            <Plus className="w-4 h-4 mr-1.5" />
-            Buat Strategy Pertama
-          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

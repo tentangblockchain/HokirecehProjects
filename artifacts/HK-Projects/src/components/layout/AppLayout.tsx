@@ -286,7 +286,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             ))}
           </NavGroup>
 
-          <NavGroup label="Extended" accentClass="text-violet-400/70">
+          <NavGroup label="Extended DEX" accentClass="text-violet-400/70">
             {extendedItems.map((item) => (
               <NavLink key={item.href} {...item} location={location} />
             ))}
