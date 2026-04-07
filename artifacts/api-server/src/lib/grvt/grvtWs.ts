@@ -1,18 +1,24 @@
 import WebSocket from "ws";
 import Decimal from "decimal.js";
 import { logger } from "../logger";
-import type { GrvtNetwork, GrvtOrderbookL2, GrvtTrade } from "./grvtTypes";
+import type { GrvtNetwork, GrvtOrderbookL2, GrvtTrade, GrvtAuthSession } from "./grvtTypes";
 import { GRVT_WS_URLS } from "./grvtTypes";
 
 // ─── GRVT WebSocket ────────────────────────────────────────────────────────────
-// GRVT WS menggunakan JSON-RPC 2.0, bukan standard pub/sub.
-// Subscribe message: { jsonrpc: "2.0", method: "subscribe", params: { stream, ... }, id: N }
-// Response event: { jsonrpc: "2.0", method: "subscribe", params: { channel, data } }
+// GRVT WS menggunakan format subscribe langsung (bukan JSON-RPC).
+// Subscribe message: { stream, feed, method: "subscribe", is_full: true }
+// Data event: { stream, selector, feed }
+// Subscription confirmation: { subs: [...] }
 //
-// Stream yang didukung:
-//   v1.orderbook.l2.{instrument}  → orderbook L2 (bids/asks)
-//   v1.trade.{instrument}         → recent trades
-//   v1.mini.{instrument}          → mini ticker (price feed)
+// Stream names:
+//   v1.mini.s   → mini ticker snapshot
+//   v1.mini.d   → mini ticker delta
+//   v1.book.s   → orderbook snapshot
+//   v1.book.d   → orderbook delta
+//   v1.trade.s  → trades snapshot
+//   v1.trade.d  → trades delta
+//
+// Authenticated WebSocket: sertakan header Cookie dan X-Grvt-Account-Id.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,40 +34,50 @@ const priceCallbacks = new Map<string, Map<number, GrvtPriceCallback>>();
 const orderbookCallbacks = new Map<string, Map<number, GrvtOrderbookCallback>>();
 const tradeCallbacks = new Map<string, Map<number, GrvtTradeCallback>>();
 
+// Tracked feeds per stream type (untuk re-subscribe setelah reconnect)
+const miniTickerFeeds = new Set<string>();   // instrument names
+const orderbookFeeds = new Set<string>();    // instrument names
+const tradeFeeds = new Set<string>();        // instrument names
+
 let ws: WebSocket | null = null;
 let currentNetwork: GrvtNetwork = "mainnet";
+let currentSession: GrvtAuthSession | null = null;
 let isConnected = false;
 let isDestroyed = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 2_000;
-let rpcIdCounter = 1;
 
-// Subscribed streams set (untuk re-subscribe setelah reconnect)
-const subscribedStreams = new Set<string>();
+// ─── Session setter (untuk authenticated WebSocket) ───────────────────────────
 
-// ─── JSON-RPC helpers ─────────────────────────────────────────────────────────
-
-function nextRpcId(): number {
-  return rpcIdCounter++;
+export function setGrvtWsSession(session: GrvtAuthSession | null): void {
+  currentSession = session;
 }
 
-function sendSubscribe(stream: string): void {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+// ─── Subscribe helpers ─────────────────────────────────────────────────────────
+
+function sendSubscribe(stream: string, feeds: string[]): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN || feeds.length === 0) return;
 
   const msg = JSON.stringify({
-    jsonrpc: "2.0",
+    stream,
+    feed: feeds,
     method: "subscribe",
-    params: { stream },
-    id: nextRpcId(),
+    is_full: true,
   });
 
   ws.send(msg);
-  logger.info({ stream }, "[GRVT WS] Subscribe sent");
+  logger.info({ stream, feeds }, "[GRVT WS] Subscribe sent");
 }
 
 function resubscribeAll(): void {
-  for (const stream of subscribedStreams) {
-    sendSubscribe(stream);
+  if (miniTickerFeeds.size > 0) {
+    sendSubscribe("v1.mini.s", Array.from(miniTickerFeeds));
+  }
+  if (orderbookFeeds.size > 0) {
+    sendSubscribe("v1.book.s", Array.from(orderbookFeeds));
+  }
+  if (tradeFeeds.size > 0) {
+    sendSubscribe("v1.trade.s", Array.from(tradeFeeds));
   }
 }
 
@@ -72,7 +88,7 @@ function scheduleReconnect(): void {
   logger.info({ delayMs: reconnectDelay }, "[GRVT WS] Scheduling reconnect");
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    if (!isDestroyed) connect(currentNetwork);
+    if (!isDestroyed) connect(currentNetwork, currentSession ?? undefined);
   }, reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
 }
@@ -81,45 +97,59 @@ function scheduleReconnect(): void {
 
 function handleMessage(raw: string): void {
   try {
-    const msg = JSON.parse(raw) as {
-      jsonrpc?: string;
-      method?: string;
-      params?: any;
-      result?: any;
-      error?: any;
-      id?: number;
-    };
+    const msg = JSON.parse(raw) as Record<string, any>;
 
-    // Confirmation / error response (id present)
-    if (msg.id !== undefined && msg.error) {
-      logger.warn({ error: msg.error }, "[GRVT WS] Subscribe error response");
+    // ── Subscription confirmation (field: subs) ───────────────────────────────
+    if (msg["subs"] !== undefined) {
+      logger.info({ subs: msg["subs"] }, "[GRVT WS] Subscription confirmed");
       return;
     }
 
-    // Event broadcast
-    if (msg.method === "subscribe" && msg.params) {
-      const { channel, data } = msg.params as { channel?: string; data?: any };
+    // ── Data event (field: stream, selector, feed) ────────────────────────────
+    const stream: string | undefined = msg["stream"];
+    const selector: string | undefined = msg["selector"];
+    const feed: any = msg["feed"];
 
-      if (!channel || !data) return;
+    if (!stream || feed === undefined) return;
 
-      // ── Mini ticker (price feed) ────────────────────────────────────────────
-      if (channel.startsWith("v1.mini.") || channel === "v1.mini") {
-        handleMiniTickerEvent(data);
-        return;
+    const instrument = selector ?? "";
+
+    // ── Mini ticker (price feed) ──────────────────────────────────────────────
+    if (stream === "v1.mini.s" || stream === "v1.mini.d") {
+      if (Array.isArray(feed)) {
+        for (const item of feed) {
+          handleMiniTickerEvent(item);
+        }
+      } else {
+        handleMiniTickerEvent(feed);
       }
-
-      // ── Orderbook L2 ───────────────────────────────────────────────────────
-      if (channel.startsWith("v1.orderbook.l2.") || channel === "v1.orderbook.l2") {
-        handleOrderbookEvent(data);
-        return;
-      }
-
-      // ── Trade ─────────────────────────────────────────────────────────────
-      if (channel.startsWith("v1.trade.") || channel === "v1.trade") {
-        handleTradeEvent(data);
-        return;
-      }
+      return;
     }
+
+    // ── Orderbook ─────────────────────────────────────────────────────────────
+    if (stream === "v1.book.s" || stream === "v1.book.d") {
+      if (Array.isArray(feed)) {
+        for (const item of feed) {
+          handleOrderbookEvent(item, instrument);
+        }
+      } else {
+        handleOrderbookEvent(feed, instrument);
+      }
+      return;
+    }
+
+    // ── Trades ────────────────────────────────────────────────────────────────
+    if (stream === "v1.trade.s" || stream === "v1.trade.d") {
+      if (Array.isArray(feed)) {
+        for (const item of feed) {
+          handleTradeEvent(item, instrument);
+        }
+      } else {
+        handleTradeEvent(feed, instrument);
+      }
+      return;
+    }
+
   } catch {
     // ignore parse errors
   }
@@ -158,9 +188,9 @@ function handleMiniTickerEvent(data: any): void {
   } catch { /* ignore */ }
 }
 
-function handleOrderbookEvent(data: any): void {
+function handleOrderbookEvent(data: any, fallbackInstrument: string): void {
   try {
-    const instrument: string = data.instrument ?? data.i;
+    const instrument: string = data.instrument ?? data.i ?? fallbackInstrument;
     if (!instrument) return;
 
     const ob: GrvtOrderbookL2 = {
@@ -178,7 +208,6 @@ function handleOrderbookEvent(data: any): void {
       })),
     };
 
-    // Update price cache dari best bid/ask orderbook
     if (ob.bids.length > 0 && ob.asks.length > 0) {
       const bid = new Decimal(ob.bids[0].price);
       const ask = new Decimal(ob.asks[0].price);
@@ -204,9 +233,9 @@ function handleOrderbookEvent(data: any): void {
   } catch { /* ignore */ }
 }
 
-function handleTradeEvent(data: any): void {
+function handleTradeEvent(data: any, fallbackInstrument: string): void {
   try {
-    const instrument: string = data.instrument ?? data.i;
+    const instrument: string = data.instrument ?? data.i ?? fallbackInstrument;
     if (!instrument) return;
 
     const trade: GrvtTrade = {
@@ -231,10 +260,13 @@ function handleTradeEvent(data: any): void {
 }
 
 // ─── Connect ──────────────────────────────────────────────────────────────────
+// session opsional — jika disediakan, header Cookie dan X-Grvt-Account-Id
+// akan ditambahkan saat koneksi WebSocket (authenticated stream).
 
-export function connect(network: GrvtNetwork = "mainnet"): void {
+export function connect(network: GrvtNetwork = "mainnet", session?: GrvtAuthSession): void {
   if (isDestroyed) return;
   currentNetwork = network;
+  if (session) currentSession = session;
 
   if (ws) {
     if (isConnected) return;
@@ -245,7 +277,17 @@ export function connect(network: GrvtNetwork = "mainnet"): void {
   const url = GRVT_WS_URLS[network];
   logger.info({ url, network }, "[GRVT WS] Connecting");
 
-  const sock = new WebSocket(url);
+  // Build optional auth headers untuk authenticated WebSocket
+  const wsOptions: WebSocket.ClientOptions = {};
+  const sess = currentSession;
+  if (sess?.cookie || sess?.accountId) {
+    const extraHeaders: Record<string, string> = {};
+    if (sess.cookie) extraHeaders["Cookie"] = sess.cookie;
+    if (sess.accountId) extraHeaders["X-Grvt-Account-Id"] = sess.accountId;
+    wsOptions.headers = extraHeaders;
+  }
+
+  const sock = new WebSocket(url, wsOptions);
   ws = sock;
 
   sock.on("open", () => {
@@ -286,14 +328,12 @@ export function registerGrvtPriceCallback(
   }
   priceCallbacks.get(instrument)!.set(strategyId, callback);
 
-  // Subscribe to mini ticker stream for price feed
-  const stream = `v1.mini.${instrument}`;
-  subscribedStreams.add(stream);
+  miniTickerFeeds.add(instrument);
 
   if (!ws || !isConnected) {
     connect(network);
   } else {
-    sendSubscribe(stream);
+    sendSubscribe("v1.mini.s", Array.from(miniTickerFeeds));
   }
 }
 
@@ -301,7 +341,10 @@ export function unregisterGrvtPriceCallback(instrument: string, strategyId: numb
   const callbacks = priceCallbacks.get(instrument);
   if (callbacks) {
     callbacks.delete(strategyId);
-    if (callbacks.size === 0) priceCallbacks.delete(instrument);
+    if (callbacks.size === 0) {
+      priceCallbacks.delete(instrument);
+      miniTickerFeeds.delete(instrument);
+    }
   }
 
   grvtWsPriceCache.delete(instrument);
@@ -324,13 +367,12 @@ export function registerGrvtOrderbookCallback(
   }
   orderbookCallbacks.get(instrument)!.set(subscriptionId, callback);
 
-  const stream = `v1.orderbook.l2.${instrument}`;
-  subscribedStreams.add(stream);
+  orderbookFeeds.add(instrument);
 
   if (!ws || !isConnected) {
     connect(network);
   } else {
-    sendSubscribe(stream);
+    sendSubscribe("v1.book.s", Array.from(orderbookFeeds));
   }
 }
 
@@ -338,7 +380,10 @@ export function unregisterGrvtOrderbookCallback(instrument: string, subscription
   const callbacks = orderbookCallbacks.get(instrument);
   if (callbacks) {
     callbacks.delete(subscriptionId);
-    if (callbacks.size === 0) orderbookCallbacks.delete(instrument);
+    if (callbacks.size === 0) {
+      orderbookCallbacks.delete(instrument);
+      orderbookFeeds.delete(instrument);
+    }
   }
 }
 
@@ -355,13 +400,12 @@ export function registerGrvtTradeCallback(
   }
   tradeCallbacks.get(instrument)!.set(subscriptionId, callback);
 
-  const stream = `v1.trade.${instrument}`;
-  subscribedStreams.add(stream);
+  tradeFeeds.add(instrument);
 
   if (!ws || !isConnected) {
     connect(network);
   } else {
-    sendSubscribe(stream);
+    sendSubscribe("v1.trade.s", Array.from(tradeFeeds));
   }
 }
 
@@ -386,6 +430,8 @@ export function destroyGrvtWs(): void {
   priceCallbacks.clear();
   orderbookCallbacks.clear();
   tradeCallbacks.clear();
-  subscribedStreams.clear();
+  miniTickerFeeds.clear();
+  orderbookFeeds.clear();
+  tradeFeeds.clear();
   grvtWsPriceCache.clear();
 }

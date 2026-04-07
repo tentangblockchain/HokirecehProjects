@@ -1,87 +1,123 @@
+import * as https from "https";
+import * as http from "http";
+import { URL } from "url";
 import { ethers } from "ethers";
 import { logger } from "../logger";
 import type { GrvtNetwork, GrvtAuthSession } from "./grvtTypes";
-import { GRVT_REST_URLS, GRVT_EIP712_DOMAINS } from "./grvtTypes";
+import { GRVT_AUTH_URLS, GRVT_EIP712_DOMAINS } from "./grvtTypes";
 
-// ─── Timeout & retry ──────────────────────────────────────────────────────────
+// ─── Raw HTTP request helper (untuk baca Set-Cookie header) ───────────────────
+// fetch() tidak expose response headers Set-Cookie secara proper di Node.js,
+// sehingga kita menggunakan https.request() secara langsung.
 
-const FETCH_TIMEOUT_MS = 15_000;
+interface RawHttpResponse {
+  statusCode: number;
+  headers: http.IncomingHttpHeaders;
+  body: string;
+}
 
-async function grvtAuthFetch<T>(
-  url: string,
-  body: unknown
-): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
+function rawHttpPost(urlStr: string, payload: unknown): Promise<RawHttpResponse> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(urlStr);
+    const bodyStr = JSON.stringify(payload);
+
+    const options: https.RequestOptions = {
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + parsed.search,
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "Content-Length": Buffer.byteLength(bodyStr),
         "User-Agent": "HokirecehProjects/1.0 GRVTIntegration",
       },
-      body: JSON.stringify(body),
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk: string | Buffer) => {
+        data += typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+      });
+      res.on("end", () => {
+        resolve({
+          statusCode: res.statusCode ?? 0,
+          headers: res.headers,
+          body: data,
+        });
+      });
     });
-    clearTimeout(timer);
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`GRVT Auth error ${res.status}: ${text}`);
+
+    req.on("error", (err) => reject(err));
+    req.setTimeout(15_000, () => {
+      req.destroy(new Error("GRVT Auth request timeout"));
+    });
+
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+// ─── Ekstrak cookie gravity dari Set-Cookie header ────────────────────────────
+
+function extractGravityCookie(setCookieHeaders: string | string[] | undefined): string {
+  if (!setCookieHeaders) return "";
+  const cookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+  for (const c of cookies) {
+    if (c.startsWith("gravity=")) {
+      return c.split(";")[0].trim();
     }
-    return res.json() as Promise<T>;
-  } catch (err: any) {
-    clearTimeout(timer);
-    if (err.name === "AbortError") {
-      throw new Error(`GRVT Auth timeout after ${FETCH_TIMEOUT_MS}ms`);
-    }
-    throw err;
   }
+  return "";
 }
 
 // ─── API Key Login ─────────────────────────────────────────────────────────────
-// Endpoint: POST /auth/api_key/login
-// Body: { api_key: "..." }
-// Response: { cookie, token, expires }
+// Endpoint: POST /auth/api_key/login  (pada edge.grvt.io, BUKAN api.grvt.io)
+// Cookie gravity=... dan X-Grvt-Account-Id ada di response HEADERS, bukan body.
 
 export async function loginWithApiKey(
   apiKey: string,
   network: GrvtNetwork = "mainnet"
 ): Promise<GrvtAuthSession> {
-  const url = `${GRVT_REST_URLS[network]}/auth/api_key/login`;
+  const url = `${GRVT_AUTH_URLS[network]}/auth/api_key/login`;
   logger.info({ network }, "[GRVT Auth] Logging in with API key");
 
-  const res = await grvtAuthFetch<{ cookie?: string; token?: string; result?: { cookie?: string; token?: string } }>(
-    url,
-    { api_key: apiKey }
-  );
+  const raw = await rawHttpPost(url, { api_key: apiKey });
 
-  const cookie = res.cookie ?? res.result?.cookie;
-  const token = res.token ?? res.result?.token;
+  if (raw.statusCode < 200 || raw.statusCode >= 300) {
+    throw new Error(`GRVT Auth error ${raw.statusCode}: ${raw.body}`);
+  }
 
-  if (!cookie && !token) {
-    throw new Error("GRVT Auth: response tidak mengandung cookie atau token");
+  const cookie = extractGravityCookie(raw.headers["set-cookie"]);
+  const accountId = ((raw.headers["x-grvt-account-id"] as string) ?? "").trim();
+
+  if (!cookie) {
+    throw new Error(
+      `GRVT Auth: gravity cookie tidak ditemukan di Set-Cookie header. Body: ${raw.body}`
+    );
   }
 
   const session: GrvtAuthSession = {
-    cookie: cookie ?? "",
-    token,
+    cookie,
+    accountId,
     expiresAt: Date.now() + 23 * 60 * 60 * 1000,
   };
 
-  logger.info({ network }, "[GRVT Auth] API key login berhasil");
+  logger.info({ network, accountId }, "[GRVT Auth] API key login berhasil");
   return session;
 }
 
 // ─── Wallet Login (EIP-712) ────────────────────────────────────────────────────
-// Endpoint: POST /auth/wallet/login
-// Body: { wallet, signature, nonce }
-// Nonce: bisa string angka atau UUID, server akan memberitahu format yang diperlukan.
-// EIP-712 domain: GRVT Exchange dengan chainId sesuai network.
+// Endpoint: POST /auth/wallet/login  (pada edge.grvt.io)
+// EIP-712 struct WalletLogin: { signer: address, nonce: uint32, expiration: int64 }
+// Nonce: random uint32, Expiration: now + 5 menit dalam nanoseconds.
+// Request body: { address, signature: { signer, v, r, s, nonce, expiration, chain_id } }
 
 const WALLET_LOGIN_TYPES = {
   WalletLogin: [
-    { name: "nonce", type: "string" },
+    { name: "signer",     type: "address" },
+    { name: "nonce",      type: "uint32"  },
+    { name: "expiration", type: "int64"   },
   ],
 };
 
@@ -94,44 +130,65 @@ export async function loginWithWallet(
   const walletAddress = wallet.address;
 
   const domain = GRVT_EIP712_DOMAINS[network];
-  const nonce = generateAuthNonce();
+
+  // Nonce: random uint32
+  const nonce = Math.floor(Math.random() * 0xFFFFFFFF);
+
+  // Expiration: now + 5 menit dalam nanoseconds (BigInt)
+  const expirationNs = (BigInt(Date.now() + 5 * 60 * 1000)) * 1_000_000n;
 
   logger.info({ network, wallet: walletAddress }, "[GRVT Auth] Signing EIP-712 wallet login");
 
-  const signature = await wallet.signTypedData(
+  const rawSig = await wallet.signTypedData(
     domain as any,
     WALLET_LOGIN_TYPES,
-    { nonce }
+    {
+      signer: walletAddress,
+      nonce,
+      expiration: expirationNs,
+    }
   );
 
-  const url = `${GRVT_REST_URLS[network]}/auth/wallet/login`;
+  const sigParsed = ethers.Signature.from(rawSig);
 
-  const res = await grvtAuthFetch<{ cookie?: string; token?: string; result?: { cookie?: string; token?: string } }>(
-    url,
-    { wallet: walletAddress, signature, nonce }
-  );
+  const url = `${GRVT_AUTH_URLS[network]}/auth/wallet/login`;
 
-  const cookie = res.cookie ?? res.result?.cookie;
-  const token = res.token ?? res.result?.token;
+  const requestBody = {
+    address: walletAddress,
+    signature: {
+      signer: walletAddress,
+      v: sigParsed.v,
+      r: sigParsed.r,
+      s: sigParsed.s,
+      nonce,
+      expiration: String(expirationNs),
+      chain_id: String(domain.chainId),
+    },
+  };
 
-  if (!cookie && !token) {
-    throw new Error("GRVT Wallet Auth: response tidak mengandung cookie atau token");
+  const raw = await rawHttpPost(url, requestBody);
+
+  if (raw.statusCode < 200 || raw.statusCode >= 300) {
+    throw new Error(`GRVT Wallet Auth error ${raw.statusCode}: ${raw.body}`);
+  }
+
+  const cookie = extractGravityCookie(raw.headers["set-cookie"]);
+  const accountId = ((raw.headers["x-grvt-account-id"] as string) ?? "").trim();
+
+  if (!cookie) {
+    throw new Error(
+      `GRVT Wallet Auth: gravity cookie tidak ditemukan di Set-Cookie header. Body: ${raw.body}`
+    );
   }
 
   const session: GrvtAuthSession = {
-    cookie: cookie ?? "",
-    token,
+    cookie,
+    accountId,
     expiresAt: Date.now() + 23 * 60 * 60 * 1000,
   };
 
-  logger.info({ network, wallet: walletAddress }, "[GRVT Auth] Wallet login berhasil");
+  logger.info({ network, wallet: walletAddress, accountId }, "[GRVT Auth] Wallet login berhasil");
   return session;
-}
-
-// ─── Nonce helper ──────────────────────────────────────────────────────────────
-
-function generateAuthNonce(): string {
-  return String(Date.now());
 }
 
 // ─── Wallet address helper ─────────────────────────────────────────────────────
@@ -143,7 +200,7 @@ export function getGrvtWalletAddress(privateKey: string): string {
 
 // ─── Auth header builder ───────────────────────────────────────────────────────
 // Membangun header autentikasi dari session yang tersimpan.
-// GRVT menggunakan cookie atau Bearer token untuk authenticated requests.
+// GRVT menggunakan cookie gravity=... dan header X-Grvt-Account-Id.
 
 export function buildGrvtAuthHeaders(session: GrvtAuthSession): Record<string, string> {
   const headers: Record<string, string> = {
@@ -154,6 +211,9 @@ export function buildGrvtAuthHeaders(session: GrvtAuthSession): Record<string, s
 
   if (session.cookie) {
     headers["Cookie"] = session.cookie;
+  }
+  if (session.accountId) {
+    headers["X-Grvt-Account-Id"] = session.accountId;
   }
   if (session.token) {
     headers["Authorization"] = `Bearer ${session.token}`;

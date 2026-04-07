@@ -14,17 +14,19 @@ Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 
+// ─── Internal POST fetch ───────────────────────────────────────────────────────
+// Semua endpoint market data GRVT menggunakan method POST dengan path /full/v1/...
+
 async function grvtFetch<T>(
   path: string,
   network: GrvtNetwork = "mainnet",
-  options?: RequestInit
+  body: unknown = {}
 ): Promise<T> {
   const url = `${GRVT_REST_URLS[network]}${path}`;
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
     "User-Agent": "HokirecehProjects/1.0 GRVTIntegration",
-    ...(options?.headers as Record<string, string> | undefined),
   };
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -33,7 +35,12 @@ async function grvtFetch<T>(
 
     let res: Response;
     try {
-      res = await fetch(url, { ...options, signal: controller.signal, headers });
+      res = await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers,
+        body: JSON.stringify(body),
+      });
     } catch (err: any) {
       clearTimeout(timer);
       if (err.name === "AbortError") {
@@ -76,8 +83,7 @@ const instrumentCaches = new Map<GrvtNetwork, InstrumentCache>();
 const runtimeFallback = new Map<GrvtNetwork, GrvtInstrument[]>();
 
 // ─── Public: Get all instruments ───────────────────────────────────────────────
-// Endpoint: GET /v1/instruments
-// Returns list of all active instruments (perpetuals).
+// Endpoint: POST /full/v1/instruments  (body: {})
 
 export async function getInstruments(
   network: GrvtNetwork = "mainnet"
@@ -89,8 +95,9 @@ export async function getInstruments(
 
   try {
     const res = await grvtFetch<GrvtApiResponse<GrvtInstrument[]>>(
-      "/v1/instruments",
-      network
+      "/full/v1/instruments",
+      network,
+      {}
     );
 
     const instruments: GrvtInstrument[] = Array.isArray(res)
@@ -131,8 +138,7 @@ export async function getInstrumentByName(
 }
 
 // ─── Get mini ticker ───────────────────────────────────────────────────────────
-// Endpoint: POST /v1/mini
-// Body: { instrument: "BTC_USDT_Perp" }
+// Endpoint: POST /full/v1/mini  (body: { instrument })
 
 export async function getMiniTicker(
   instrument: string,
@@ -140,9 +146,9 @@ export async function getMiniTicker(
 ): Promise<GrvtMiniTicker | null> {
   try {
     const res = await grvtFetch<GrvtApiResponse<GrvtMiniTicker>>(
-      "/v1/mini",
+      "/full/v1/mini",
       network,
-      { method: "POST", body: JSON.stringify({ instrument }) }
+      { instrument }
     );
     const ticker = (res as any).result ?? res;
     if (ticker && typeof ticker === "object" && ticker.instrument) {
@@ -156,16 +162,16 @@ export async function getMiniTicker(
 }
 
 // ─── Get all mini tickers ──────────────────────────────────────────────────────
-// Endpoint: POST /v1/mini — tanpa body untuk semua instrument
+// Endpoint: POST /full/v1/mini  (body: {})
 
 export async function getAllMiniTickers(
   network: GrvtNetwork = "mainnet"
 ): Promise<GrvtMiniTicker[]> {
   try {
     const res = await grvtFetch<GrvtApiResponse<GrvtMiniTicker[]>>(
-      "/v1/mini",
+      "/full/v1/mini",
       network,
-      { method: "POST", body: JSON.stringify({}) }
+      {}
     );
     const result = (res as any).result ?? res;
     return Array.isArray(result) ? result : [];
@@ -176,8 +182,7 @@ export async function getAllMiniTickers(
 }
 
 // ─── Get recent trades ─────────────────────────────────────────────────────────
-// Endpoint: POST /v1/trades
-// Body: { instrument, limit, cursor }
+// Endpoint: POST /full/v1/trades  (body: { instrument, limit })
 
 export async function getRecentTrades(
   instrument: string,
@@ -186,12 +191,9 @@ export async function getRecentTrades(
 ): Promise<GrvtTrade[]> {
   try {
     const res = await grvtFetch<GrvtApiResponse<GrvtTrade[]>>(
-      "/v1/trades",
+      "/full/v1/trades",
       network,
-      {
-        method: "POST",
-        body: JSON.stringify({ instrument, limit: String(limit) }),
-      }
+      { instrument, limit: String(limit) }
     );
     const result = (res as any).result ?? res;
     return Array.isArray(result) ? result : [];

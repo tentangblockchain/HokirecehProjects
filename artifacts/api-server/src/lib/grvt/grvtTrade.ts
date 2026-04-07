@@ -59,22 +59,22 @@ async function grvtTradeFetch<T>(
 
 // ─── EIP-712 Types for Order Signing ──────────────────────────────────────────
 // GRVT menggunakan EIP-712 typed data untuk sign order.
-// Tipe ini berdasarkan dokumentasi https://api-docs.grvt.io/
+// clientOrderID menggunakan uint64 agar mendukung range [2^63, 2^64-1].
 
 const ORDER_TYPES = {
   Order: [
     { name: "subAccountID",  type: "uint64"   },
-    { name: "clientOrderID", type: "uint32"   },
+    { name: "clientOrderID", type: "uint64"   },
     { name: "timeInForce",   type: "uint8"    },
     { name: "postOnly",      type: "bool"     },
     { name: "reduceOnly",    type: "bool"     },
     { name: "legs",          type: "OrderLeg[]" },
   ],
   OrderLeg: [
-    { name: "contractID", type: "uint32"  },
-    { name: "size",       type: "uint64"  },
-    { name: "limitPrice", type: "uint64"  },
-    { name: "isBuyingContract", type: "bool" },
+    { name: "contractID",       type: "uint32" },
+    { name: "size",             type: "uint64" },
+    { name: "limitPrice",       type: "uint64" },
+    { name: "isBuyingContract", type: "bool"   },
   ],
 };
 
@@ -93,16 +93,26 @@ function generateOrderNonce(): number {
   return Math.floor(Math.random() * 2147483647);
 }
 
+// ─── Client order ID helper ────────────────────────────────────────────────────
+// Menggunakan range [2^63, 2^64-1] untuk menghindari konflik dengan GRVT UI.
+// Format: (timestamp << 20) | (random 20 bits)
+
+function generateClientOrderId(nonce: number): bigint {
+  return (BigInt(Date.now()) << 20n) | (BigInt(nonce) & 0xFFFFFn);
+}
+
 // ─── Expiry helper ─────────────────────────────────────────────────────────────
-// Expiration default: 30 hari dari sekarang (dalam microseconds)
+// Expiration dalam nanoseconds menggunakan BigInt untuk menghindari precision loss.
 
 function generateExpiry(daysFromNow = 30): string {
-  return String(Date.now() * 1000 + daysFromNow * 24 * 60 * 60 * 1_000_000);
+  const nowNs = BigInt(Date.now()) * 1_000_000n;
+  const daysNs = BigInt(daysFromNow) * 24n * 60n * 60n * 1_000_000_000n;
+  return String(nowNs + daysNs);
 }
 
 // ─── Sign Order (EIP-712) ──────────────────────────────────────────────────────
 // GRVT sign order menggunakan EIP-712 typed data.
-// subAccountID, clientOrderID, dsb adalah uint types yang harus di-convert ke bigint.
+// chain_id ditambahkan ke signature object sesuai spesifikasi GRVT.
 
 export async function signGrvtOrder(
   privateKey: string,
@@ -127,13 +137,13 @@ export async function signGrvtOrder(
 
   const nonce = generateOrderNonce();
   const expiration = generateExpiry();
-  const clientOrderId = params.clientOrderId ?? (nonce % 65536);
+
+  // client_order_id dalam range [2^63, 2^64-1]
+  const clientOrderIdBig = generateClientOrderId(
+    params.clientOrderId !== undefined ? params.clientOrderId : nonce
+  );
 
   const tifValue = TIME_IN_FORCE_MAP[params.timeInForce] ?? 1;
-
-  // Convert size dan price dari decimal string ke uint64 (multiply by 1e4 untuk GRVT precision)
-  const PRICE_MULTIPLIER = 10_000n;
-  const SIZE_MULTIPLIER = 10_000n;
 
   const legs = params.legs.map((leg) => ({
     contractID: leg.contractId,
@@ -144,7 +154,7 @@ export async function signGrvtOrder(
 
   const value = {
     subAccountID: BigInt(params.subAccountId),
-    clientOrderID: clientOrderId,
+    clientOrderID: clientOrderIdBig,
     timeInForce: tifValue,
     postOnly: params.postOnly,
     reduceOnly: params.reduceOnly,
@@ -166,16 +176,15 @@ export async function signGrvtOrder(
     v: sigParsed.v,
     expiration,
     nonce,
+    chain_id: String(domain.chainId),
   };
 
-  logger.debug({ signer: wallet.address }, "[GRVT Trade] Order signed");
+  logger.debug({ signer: wallet.address, chain_id: signature.chain_id }, "[GRVT Trade] Order signed");
   return signature;
 }
 
 // ─── Create Order ──────────────────────────────────────────────────────────────
 // Endpoint: POST /full/v1/create_order
-// GRVT orders harus di-sign sebelum dikirim.
-// Satu order bisa memiliki beberapa legs (untuk spread/combo), tapi biasanya satu leg.
 
 export async function createGrvtOrder(
   session: GrvtAuthSession,
@@ -261,7 +270,6 @@ export async function createGrvtOrder(
 
 // ─── Cancel Order ──────────────────────────────────────────────────────────────
 // Endpoint: POST /full/v1/cancel_order
-// Body: { sub_account_id, order_id? }
 
 export async function cancelGrvtOrder(
   session: GrvtAuthSession,
@@ -275,7 +283,6 @@ export async function cancelGrvtOrder(
 
 // ─── Cancel All Orders ─────────────────────────────────────────────────────────
 // Endpoint: POST /full/v1/cancel_all_orders
-// Body: { sub_account_id, kind?, base?, quote? }
 
 export async function cancelAllGrvtOrders(
   session: GrvtAuthSession,
@@ -291,7 +298,6 @@ export async function cancelAllGrvtOrders(
 
 // ─── Amend Order ──────────────────────────────────────────────────────────────
 // Endpoint: POST /full/v1/amend_order
-// Amend = update size/price dari existing order (re-sign diperlukan).
 
 export async function amendGrvtOrder(
   session: GrvtAuthSession,
@@ -353,7 +359,6 @@ export async function amendGrvtOrder(
 
 // ─── Get single order ──────────────────────────────────────────────────────────
 // Endpoint: POST /full/v1/order
-// Body: { order_id, sub_account_id }
 
 export async function getGrvtOrder(
   session: GrvtAuthSession,

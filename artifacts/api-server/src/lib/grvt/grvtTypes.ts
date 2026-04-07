@@ -6,14 +6,22 @@ export type GrvtNetwork = "mainnet" | "testnet";
 
 // ─── Base URLs ────────────────────────────────────────────────────────────────
 
+// Auth endpoint (edge.grvt.io) — BERBEDA dari data/trading endpoint
+export const GRVT_AUTH_URLS: Record<GrvtNetwork, string> = {
+  mainnet: "https://edge.grvt.io",
+  testnet: "https://edge.testnet.grvt.io",
+};
+
+// Market data & trading REST endpoint
 export const GRVT_REST_URLS: Record<GrvtNetwork, string> = {
   mainnet: "https://api.grvt.io",
   testnet: "https://api.testnet.grvt.io",
 };
 
+// WebSocket endpoint — path /ws/full untuk full data stream
 export const GRVT_WS_URLS: Record<GrvtNetwork, string> = {
-  mainnet: "wss://stream.grvt.io",
-  testnet: "wss://stream.testnet.grvt.io",
+  mainnet: "wss://stream.grvt.io/ws/full",
+  testnet: "wss://stream.testnet.grvt.io/ws/full",
 };
 
 // ─── Auth types ────────────────────────────────────────────────────────────────
@@ -23,15 +31,23 @@ export interface GrvtApiKeyLoginRequest {
 }
 
 export interface GrvtWalletLoginRequest {
-  wallet: string;
-  signature: string;
-  nonce: string;
+  address: string;
+  signature: {
+    signer: string;
+    v: number;
+    r: string;
+    s: string;
+    nonce: number;
+    expiration: string;
+    chain_id: string;
+  };
 }
 
 export interface GrvtAuthSession {
   cookie: string;
   token?: string;
   expiresAt?: number;
+  accountId: string;
 }
 
 // ─── Instrument types ──────────────────────────────────────────────────────────
@@ -164,6 +180,7 @@ export interface GrvtSignature {
   v: number;
   expiration: string;
   nonce: number;
+  chain_id: string;
 }
 
 // ─── Create order request ──────────────────────────────────────────────────────
