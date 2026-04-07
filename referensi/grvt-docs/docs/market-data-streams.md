@@ -1,7 +1,7 @@
 # Market Data Websocket - Gravity Markets API Docs
 
 > Source  : https://api-docs.grvt.io/market_data_streams/
-> Fetched : 2026-04-07T15:10:54.862Z
+> Fetched : 2026-04-07T15:12:37.460Z
 > Engine  : MkDocs Material
 
 

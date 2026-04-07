@@ -1,7 +1,7 @@
 # Referral Data - Gravity Markets API Docs
 
 > Source  : https://api-docs.grvt.io/referral_data/
-> Fetched : 2026-04-07T15:10:58.473Z
+> Fetched : 2026-04-07T15:12:40.211Z
 > Engine  : MkDocs Material
 
 

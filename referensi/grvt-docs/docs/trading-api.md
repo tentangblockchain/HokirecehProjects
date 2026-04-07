@@ -1,7 +1,7 @@
 # Trading API - Gravity Markets API Docs
 
 > Source  : https://api-docs.grvt.io/trading_api/
-> Fetched : 2026-04-07T15:10:56.023Z
+> Fetched : 2026-04-07T15:12:38.257Z
 > Engine  : MkDocs Material
 
 

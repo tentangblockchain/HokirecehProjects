@@ -1,7 +1,7 @@
 # API Setup Guide - Gravity Markets API Docs
 
 > Source  : https://api-docs.grvt.io/api_setup/
-> Fetched : 2026-04-07T15:10:52.909Z
+> Fetched : 2026-04-07T15:12:35.415Z
 > Engine  : MkDocs Material
 
 
