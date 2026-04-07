@@ -319,7 +319,7 @@ export async function clearPauseNotification(strategyId: number): Promise<void> 
 // Exchange-agnostic formatters — dipanggil dari semua bot engines.
 // Perubahan format cukup di sini tanpa menyentuh engine files lagi.
 
-export type DexName = "lighter" | "extended" | "ethereal";
+export type DexName = "lighter" | "extended" | "ethereal" | "grvt";
 
 function dexLabel(dex: DexName): string {
   if (dex === "lighter") return "⚡ Lighter";
