@@ -105,7 +105,7 @@ router.get("/ticker/:instrument", async (req: AuthRequest, res) => {
   try {
     const creds = await getGrvtCredentials(req.userId!).catch(() => null);
     const network = (creds?.grvtNetwork ?? "mainnet") as GrvtNetwork;
-    const { instrument } = req.params;
+    const instrument = String(req.params.instrument);
 
     const ticker = await getMiniTicker(instrument, network);
     if (!ticker) {

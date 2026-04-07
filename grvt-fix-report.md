@@ -175,6 +175,39 @@ File yang **TIDAK** diubah (sesuai aturan keselamatan):
 
 ---
 
+## Fix Tambahan (Post-Deploy VPS)
+
+Error yang baru terdeteksi saat VPS menjalankan TypeScript strict check setelah db di-build:
+
+### FIX-A — groqAI.ts: "grvt" tidak ada di union type MarketContext.exchange
+
+**File:** `src/lib/groqAI.ts`
+
+**Masalah:** Interface `MarketContext` mendefinisikan `exchange: "lighter" | "extended" | "ethereal"` — tidak termasuk `"grvt"`. Ketika `routes/ai.ts` memanggil `analyzeMarketForStrategy({ exchange: "grvt", ... })`, TypeScript error `TS2322`.
+
+**Perbaikan:**
+- Ditambahkan `"grvt"` ke union type di `MarketContext.exchange`
+- Ditambahkan case `"grvt"` di `exchangeLabel`: `"GRVT Exchange (ZK perp DEX)"`
+- Ditambahkan case `"grvt"` di `feeContext`: `"Maker fee 0.02%, Taker fee 0.05% — always use LIMIT/Post-Only"`
+- Ditambahkan case `"grvt"` di `systemPrompt` (menggunakan `LIGHTER_SYSTEM_PROMPT` sebagai baseline perp DEX)
+- Ditambahkan case `"grvt"` di `limitPriceOffset` (default `0.2` untuk DCA, `0.1` untuk Grid)
+
+### FIX-B — routes/grvt/bot.ts: req.params bertipe string | string[]
+
+**File:** `src/routes/grvt/bot.ts`
+
+**Masalah:** Express `req.params.instrument` bertipe `string | string[]`, tapi `getMiniTicker(instrument, network)` hanya menerima `string`. TypeScript error `TS2345`.
+
+**Perbaikan:**
+```typescript
+// Sebelum:
+const { instrument } = req.params;
+// Sesudah:
+const instrument = String(req.params.instrument);
+```
+
+---
+
 ## Hasil TypeScript Build
 
 **Status: SUKSES ✅**

@@ -261,7 +261,7 @@ Valid JSON only, no markdown, no extra text:
 }`;
 
 export interface MarketContext {
-  exchange: "lighter" | "extended" | "ethereal";
+  exchange: "lighter" | "extended" | "ethereal" | "grvt";
   symbol: string;
   type: "perp" | "spot";
   lastPrice: number;
@@ -322,11 +322,15 @@ function buildUserPrompt(strategyType: "dca" | "grid", market: MarketContext): s
   const exchangeLabel = market.exchange === "ethereal" ? "Ethereal Exchange (Arbitrum perp DEX)"
     : market.exchange === "extended"
     ? "Extended Exchange (StarkNet perp DEX)"
+    : market.exchange === "grvt"
+    ? "GRVT Exchange (ZK perp DEX)"
     : "Lighter DEX";
 
   const feeContext = market.exchange === "ethereal" ? "Maker rebate -0.002%, Taker fee 0.025% — POST-ONLY wajib untuk dapat rebates"
     : market.exchange === "extended"
     ? "Maker fee 0%, Taker fee 0.025% — always use LIMIT/Post-Only to avoid taker fees"
+    : market.exchange === "grvt"
+    ? "Maker fee 0.02%, Taker fee 0.05% — always use LIMIT/Post-Only to minimize fees"
     : "Standard Account: zero maker/taker fees — always prefer LIMIT/Post-Only";
 
   return `Analyze this ${exchangeLabel} market and recommend optimal ${strategyType.toUpperCase()} strategy parameters.
@@ -416,6 +420,8 @@ export async function analyzeMarketForStrategy(
   const systemPrompt = market.exchange === "ethereal" ? ETHEREAL_SYSTEM_PROMPT
     : market.exchange === "extended"
     ? EXTENDED_SYSTEM_PROMPT
+    : market.exchange === "grvt"
+    ? LIGHTER_SYSTEM_PROMPT
     : LIGHTER_SYSTEM_PROMPT;
 
   logger.info({ totalKeys: keys.length, exchange: market.exchange }, "AI analysis started with key pool");
@@ -456,8 +462,9 @@ export async function analyzeMarketForStrategy(
       side: parsed.dca_params.side ?? "buy",
       orderType: parsed.dca_params.orderType ?? "limit",
       limitPriceOffset: parsed.dca_params.limitPriceOffset ?? (
-        market.exchange === "lighter" ? 0.4 : 
-        market.exchange === "ethereal" ? 0.05 : 
+        market.exchange === "lighter" ? 0.4 :
+        market.exchange === "ethereal" ? 0.05 :
+        market.exchange === "grvt" ? 0.2 :
         0.2  // extended
       ),
     } : null,
@@ -469,8 +476,9 @@ export async function analyzeMarketForStrategy(
       mode: parsed.grid_params.mode ?? "neutral",
       orderType: parsed.grid_params.orderType ?? "post_only",
       limitPriceOffset: parsed.grid_params.limitPriceOffset ?? (
-        market.exchange === "lighter" ? 0.4 : 
-        market.exchange === "ethereal" ? 0.05 : 
+        market.exchange === "lighter" ? 0.4 :
+        market.exchange === "ethereal" ? 0.05 :
+        market.exchange === "grvt" ? 0.1 :
         0.1  // extended
       ),
       stopLoss: parsed.grid_params.stopLoss ?? null,
