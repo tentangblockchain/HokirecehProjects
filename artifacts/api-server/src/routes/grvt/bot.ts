@@ -298,6 +298,63 @@ router.delete("/credentials", async (req: AuthRequest, res) => {
   }
 });
 
+// ─── BOT ENGINE ────────────────────────────────────────────────────────────────
+
+import {
+  startGrvtBot,
+  stopGrvtBot,
+  isGrvtBotRunning,
+  getGrvtBotNextRunAt,
+} from "../../lib/grvt/grvtBotEngine";
+
+// ─── START BOT ─────────────────────────────────────────────────────────────────
+
+router.post("/:strategyId/start", async (req: AuthRequest, res) => {
+  const strategyId = parseInt(String(req.params.strategyId));
+  if (isNaN(strategyId)) return res.status(400).json({ error: "strategyId tidak valid" });
+
+  try {
+    const strategy = await db.query.strategiesTable.findFirst({
+      where: and(
+        eq(strategiesTable.id, strategyId),
+        eq(strategiesTable.userId, req.userId!),
+        eq(strategiesTable.exchange, "grvt")
+      ),
+    });
+    if (!strategy) return res.status(404).json({ error: "Strategy GRVT tidak ditemukan" });
+
+    await startGrvtBot(strategyId);
+    res.json({ ok: true, message: "Bot GRVT dimulai", isRunning: true, nextRunAt: getGrvtBotNextRunAt(strategyId) });
+  } catch (err: any) {
+    req.log.error({ err }, "[GRVT] Failed to start bot");
+    res.status(500).json({ error: err?.message ?? "Gagal memulai bot GRVT" });
+  }
+});
+
+// ─── STOP BOT ──────────────────────────────────────────────────────────────────
+
+router.post("/:strategyId/stop", async (req: AuthRequest, res) => {
+  const strategyId = parseInt(String(req.params.strategyId));
+  if (isNaN(strategyId)) return res.status(400).json({ error: "strategyId tidak valid" });
+
+  try {
+    const strategy = await db.query.strategiesTable.findFirst({
+      where: and(
+        eq(strategiesTable.id, strategyId),
+        eq(strategiesTable.userId, req.userId!),
+        eq(strategiesTable.exchange, "grvt")
+      ),
+    });
+    if (!strategy) return res.status(404).json({ error: "Strategy GRVT tidak ditemukan" });
+
+    await stopGrvtBot(strategyId);
+    res.json({ ok: true, message: "Bot GRVT dihentikan", isRunning: false });
+  } catch (err: any) {
+    req.log.error({ err }, "[GRVT] Failed to stop bot");
+    res.status(500).json({ error: err?.message ?? "Gagal menghentikan bot GRVT" });
+  }
+});
+
 // ─── LIST STRATEGIES ───────────────────────────────────────────────────────────
 
 router.get("/", async (req: AuthRequest, res) => {
