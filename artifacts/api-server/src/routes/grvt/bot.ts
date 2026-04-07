@@ -455,12 +455,13 @@ router.get("/logs/recent", async (req: AuthRequest, res) => {
     const logs = await db.query.botLogsTable.findMany({
       where: and(
         eq(botLogsTable.userId, req.userId!),
+        eq(botLogsTable.exchange, "grvt"),
         strategyId ? eq(botLogsTable.strategyId, strategyId) : undefined
       ),
       orderBy: [desc(botLogsTable.createdAt)],
       limit,
     });
-    res.json(logs);
+    res.json({ logs });
   } catch (err) {
     req.log.error({ err }, "[GRVT] Failed to fetch logs");
     res.status(500).json({ error: "Gagal mengambil logs GRVT" });

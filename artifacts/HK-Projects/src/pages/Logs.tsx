@@ -8,7 +8,7 @@ import { formatWIBDateTime } from "@/lib/utils";
 import { ExchangeLogo } from "@/components/ui/ExchangeLogo";
 
 type LogLevel = "all" | "error" | "warn" | "info";
-type ExchangeFilter = "all" | "lighter" | "extended" | "ethereal";
+type ExchangeFilter = "all" | "lighter" | "extended" | "ethereal" | "grvt";
 
 const LEVEL_FILTERS: { value: LogLevel; label: string }[] = [
   { value: "all", label: "Semua" },
@@ -22,12 +22,13 @@ const EXCHANGE_FILTERS: { value: ExchangeFilter; label: string }[] = [
   { value: "lighter", label: "Lighter" },
   { value: "extended", label: "Extended" },
   { value: "ethereal", label: "Ethereal" },
+  { value: "grvt", label: "GRVT" },
 ];
 
 interface UnifiedLog {
   key: string;
   id: number;
-  exchange: "lighter" | "extended" | "ethereal";
+  exchange: "lighter" | "extended" | "ethereal" | "grvt";
   strategyName: string | null;
   level: string;
   message: string;
@@ -67,6 +68,22 @@ async function fetchEtherealLogs(limit: number): Promise<UnifiedLog[]> {
   }));
 }
 
+async function fetchGrvtLogs(limit: number): Promise<UnifiedLog[]> {
+  const res = await fetch(`/api/grvt/strategies/logs/recent?limit=${limit}`, { credentials: "include" });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (Array.isArray(json) ? json : (json.logs ?? [])).map((l: any) => ({
+    key: `grvt-${l.id}`,
+    id: l.id,
+    exchange: "grvt" as const,
+    strategyName: l.strategyName ?? null,
+    level: l.level,
+    message: l.message,
+    details: l.details ?? null,
+    createdAt: l.createdAt,
+  }));
+}
+
 export default function Logs() {
   const { data: lighterData, isLoading: loadingLighter } = useGetBotLogs(
     { limit: 200 },
@@ -85,6 +102,12 @@ export default function Logs() {
     refetchInterval: 5000,
   });
 
+  const { data: grvtLogs = [], isLoading: loadingGrvt } = useQuery<UnifiedLog[]>({
+    queryKey: ["grvt-logs-full", 200],
+    queryFn: () => fetchGrvtLogs(200),
+    refetchInterval: 5000,
+  });
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
   const [copied, setCopied] = useState(false);
@@ -92,7 +115,7 @@ export default function Logs() {
   const [levelFilter, setLevelFilter] = useState<LogLevel>("all");
   const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilter>("all");
 
-  const isLoading = loadingLighter || loadingExtended || loadingEthereal;
+  const isLoading = loadingLighter || loadingExtended || loadingEthereal || loadingGrvt;
 
   const allLogs = useMemo<UnifiedLog[]>(() => {
     const lighter: UnifiedLog[] = (lighterData?.logs ?? []).map((l) => ({
@@ -105,9 +128,9 @@ export default function Logs() {
       details: l.details ?? null,
       createdAt: l.createdAt,
     }));
-    return [...lighter, ...extendedLogs, ...etherealLogs]
+    return [...lighter, ...extendedLogs, ...etherealLogs, ...grvtLogs]
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  }, [lighterData, extendedLogs, etherealLogs]);
+  }, [lighterData, extendedLogs, etherealLogs, grvtLogs]);
 
   const logs = useMemo(() => {
     return allLogs.filter((l) => {
@@ -173,7 +196,7 @@ export default function Logs() {
           <Terminal className="w-6 h-6 md:w-8 md:h-8 text-primary" />
           Log Sistem
         </h1>
-        <p className="text-muted-foreground mt-1 text-sm">Eksekusi bot real-time — Lighter &amp; Extended DEX</p>
+        <p className="text-muted-foreground mt-1 text-sm">Eksekusi bot real-time — Lighter, Extended, Ethereal &amp; GRVT DEX</p>
       </header>
 
       <Card className="glass-panel flex-1 overflow-hidden flex flex-col border-border/50">
@@ -301,7 +324,7 @@ export default function Logs() {
                           <ExchangeLogo exchange={log.exchange} size={12} />
                         </span>
                         <span className="shrink-0 w-32 text-primary truncate">
-                          {log.strategyName || (log.exchange === "lighter" ? "Sistem Lighter" : log.exchange === "ethereal" ? "Sistem Ethereal" : "Sistem Extended")}
+                          {log.strategyName || (log.exchange === "lighter" ? "Sistem Lighter" : log.exchange === "ethereal" ? "Sistem Ethereal" : log.exchange === "grvt" ? "Sistem GRVT" : "Sistem Extended")}
                         </span>
                         <span className={`flex-1 min-w-0 break-words ${colorClass}`}>
                           {log.message}

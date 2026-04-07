@@ -569,6 +569,248 @@ const EtherealConfigSection = forwardRef<{ save: () => Promise<void> }>(function
   );
 });
 
+// ── GRVT DEX Credentials Section ──────────────────────────────────────────────
+
+const GrvtConfigSection = forwardRef<{ save: () => Promise<void> }>(function GrvtConfigSection(_, ref) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [creds, setCreds] = useState<{ hasApiKey: boolean; hasPrivateKey: boolean; hasCredentials: boolean; walletAddress?: string | null; subAccountId?: string | null; grvtNetwork?: string }>({
+    hasApiKey: false, hasPrivateKey: false, hasCredentials: false,
+  });
+  const [apiKey, setApiKey] = useState("");
+  const [privateKey, setPrivateKey] = useState("");
+  const [subAccountId, setSubAccountId] = useState("");
+  const [grvtNetwork, setGrvtNetwork] = useState<"mainnet" | "testnet">("mainnet");
+  const [showKey, setShowKey] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/grvt/strategies/credentials", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) {
+          setCreds(data);
+          setSubAccountId(data.subAccountId ?? "");
+          setGrvtNetwork(data.grvtNetwork ?? "mainnet");
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const body: Record<string, string> = { grvtNetwork };
+      if (apiKey.trim()) body.apiKey = apiKey.trim();
+      if (privateKey.trim()) body.privateKey = privateKey.trim();
+      if (subAccountId.trim()) body.subAccountId = subAccountId.trim();
+
+      const res = await fetch("/api/grvt/strategies/credentials", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Gagal menyimpan");
+      const updated = await res.json();
+      setCreds(prev => ({ ...prev, ...updated, hasCredentials: updated.hasCredentials }));
+      setApiKey("");
+      setPrivateKey("");
+      toast.success("Kredensial GRVT tersimpan");
+      fetch("/api/grvt/strategies/credentials", { credentials: "include" })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) { setCreds(data); setSubAccountId(data.subAccountId ?? ""); setGrvtNetwork(data.grvtNetwork ?? "mainnet"); } })
+        .catch(() => {});
+    } catch {
+      toast.error("Gagal menyimpan kredensial GRVT");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      const res = await fetch("/api/grvt/strategies/credentials", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Gagal mereset");
+      setCreds({ hasApiKey: false, hasPrivateKey: false, hasCredentials: false });
+      setApiKey("");
+      setPrivateKey("");
+      setSubAccountId("");
+      setGrvtNetwork("mainnet");
+      toast.success("Credentials GRVT berhasil direset");
+    } catch {
+      toast.error("Gagal mereset credentials GRVT");
+    } finally {
+      setResetting(false);
+      setShowResetConfirm(false);
+    }
+  };
+
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; });
+  useImperativeHandle(ref, () => ({ save: () => handleSaveRef.current() }), []);
+
+  return (
+    <Card className="glass-panel">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ExchangeLogo exchange="grvt" size={20} />
+          Kredensial GRVT DEX
+        </CardTitle>
+        <CardDescription className="mt-1">
+          API Key atau EVM Private Key untuk GRVT DEX. Disimpan terenkripsi. Sub Account ID diperlukan untuk mengambil data posisi dan melakukan order.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {loading ? (
+          <div className="space-y-3">
+            <div className="h-10 bg-muted animate-pulse rounded" />
+            <div className="h-10 bg-muted animate-pulse rounded" />
+            <div className="h-10 bg-muted animate-pulse rounded" />
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-3 mb-2">
+              {[
+                { label: "API Key", ok: creds.hasApiKey },
+                { label: "Private Key", ok: creds.hasPrivateKey },
+                { label: "Sub Account ID", ok: !!creds.subAccountId },
+              ].map(({ label, ok }) => (
+                <div key={label} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${ok ? "bg-green-500/10 border-green-500/30 text-green-400" : "bg-muted/50 border-border text-muted-foreground"}`}>
+                  {ok ? <CheckCircle2 className="w-3 h-3" /> : <Zap className="w-3 h-3 opacity-50" />}
+                  {label} {ok ? "✓" : "belum diset"}
+                </div>
+              ))}
+              {creds.walletAddress && (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-cyan-500/10 border-cyan-500/30 text-cyan-400">
+                  {creds.walletAddress.slice(0, 8)}…{creds.walletAddress.slice(-6)}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-cyan-400" /> Jaringan GRVT
+              </Label>
+              <Select value={grvtNetwork} onValueChange={(v) => setGrvtNetwork(v as "mainnet" | "testnet")}>
+                <SelectTrigger className="bg-background w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mainnet">Mainnet</SelectItem>
+                  <SelectItem value="testnet">Testnet</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-muted-foreground" /> API Key (Opsional)
+              </Label>
+              <Input
+                type="text"
+                placeholder={creds.hasApiKey ? "••• tersimpan — isi untuk mengganti •••" : "Masukkan GRVT API Key"}
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                className="bg-background font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">Gunakan API Key jika tidak ingin menggunakan Private Key.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <ShieldAlert className="w-3.5 h-3.5 text-muted-foreground" /> EVM Private Key (Opsional)
+              </Label>
+              <div className="relative">
+                <Input
+                  type={showKey ? "text" : "password"}
+                  placeholder={creds.hasPrivateKey ? "••• tersimpan — isi untuk mengganti •••" : "0x... (64 hex chars)"}
+                  value={privateKey}
+                  onChange={e => setPrivateKey(e.target.value)}
+                  className="bg-background font-mono text-sm pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">EVM private key wallet yang terdaftar di GRVT. Wallet address dihitung otomatis.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Bot className="w-3.5 h-3.5 text-muted-foreground" /> Sub Account ID
+              </Label>
+              <Input
+                type="text"
+                placeholder={creds.subAccountId ? "••• tersimpan — isi untuk mengganti •••" : "mis. 123456"}
+                value={subAccountId}
+                onChange={e => setSubAccountId(e.target.value)}
+                className="bg-background font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">Sub Account ID dari GRVT Exchange. Diperlukan untuk mengakses data posisi dan trading.</p>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowResetConfirm(true)}
+                disabled={resetting || !creds.hasCredentials}
+                className="text-destructive hover:text-destructive gap-2 text-sm"
+              >
+                {resetting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Reset GRVT
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-cyan-600 hover:bg-cyan-700 text-white gap-2"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Simpan GRVT
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+
+      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="w-5 h-5" />
+              Reset Credentials GRVT?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              API Key, Private Key, Wallet Address, dan Sub Account ID GRVT akan dihapus permanen dari server. Semua bot GRVT yang berjalan akan berhenti.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleReset}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Ya, Hapus
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
+  );
+});
+
 export default function Settings() {
   const { data: config, isLoading } = useGetBotConfig();
   const { data: strategiesData } = useGetStrategies();
@@ -579,6 +821,7 @@ export default function Settings() {
   const [pendingNetwork, setPendingNetwork] = useState<"mainnet" | "testnet" | null>(null);
   const extendedRef = useRef<{ save: () => Promise<void> } | null>(null);
   const etherealRef = useRef<{ save: () => Promise<void> } | null>(null);
+  const grvtRef = useRef<{ save: () => Promise<void> } | null>(null);
   const [showNetworkWarning, setShowNetworkWarning] = useState(false);
   const [showLighterResetConfirm, setShowLighterResetConfirm] = useState(false);
   const [resettingLighter, setResettingLighter] = useState(false);
@@ -911,6 +1154,8 @@ export default function Settings() {
           <ExtendedConfigSection ref={extendedRef} />
 
           <EtherealConfigSection ref={etherealRef} />
+
+          <GrvtConfigSection ref={grvtRef} />
 
           <Card className="glass-panel border-border/50">
             <CardHeader>

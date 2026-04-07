@@ -5,11 +5,13 @@ import { getExtendedMarketInfo } from "../lib/extended/extendedMarkets";
 import { getProductByTicker, getProductWithPrice } from "../lib/ethereal/etherealMarkets";
 import { getEtherealWsCachedPrice } from "../lib/ethereal/etherealWs";
 import { analyzeMarketForStrategy } from "../lib/groqAI";
-import { getBotConfig, getEtherealCredentials } from "./configService";
+import { getBotConfig, getEtherealCredentials, getGrvtCredentials } from "./configService";
 import { getAccountByIndex } from "../lib/lighter/lighterApi";
+import { getInstrumentByName, getMiniTicker } from "../lib/grvt/grvtMarket";
 import { logger } from "../lib/logger";
 import type { ExtendedNetwork } from "../lib/extended/extendedApi";
 import type { EtherealNetwork } from "../lib/ethereal/etherealApi";
+import type { GrvtNetwork } from "../lib/grvt/grvtTypes";
 
 const router = Router();
 router.use(authMiddleware);
@@ -27,11 +29,12 @@ router.post("/analyze", async (req: AuthRequest, res) => {
   }
 
   const isEthereal = exchange === "ethereal" && typeof marketSymbol === "string" && marketSymbol.trim().length > 0;
-  const isExtended = !isEthereal && typeof marketSymbol === "string" && marketSymbol.trim().length > 0;
-  const isLighter = !isEthereal && !isExtended && (marketIndex !== undefined && marketIndex !== null && !isNaN(Number(marketIndex)));
+  const isGrvt = exchange === "grvt" && typeof marketSymbol === "string" && marketSymbol.trim().length > 0;
+  const isExtended = !isEthereal && !isGrvt && typeof marketSymbol === "string" && marketSymbol.trim().length > 0;
+  const isLighter = !isEthereal && !isGrvt && !isExtended && (marketIndex !== undefined && marketIndex !== null && !isNaN(Number(marketIndex)));
 
-  if (!isEthereal && !isExtended && !isLighter) {
-    return res.status(400).json({ error: "Sertakan marketIndex (Lighter) atau marketSymbol (Extended/Ethereal)" });
+  if (!isEthereal && !isGrvt && !isExtended && !isLighter) {
+    return res.status(400).json({ error: "Sertakan marketIndex (Lighter) atau marketSymbol (Extended/Ethereal/GRVT)" });
   }
 
   try {
@@ -77,6 +80,41 @@ router.post("/analyze", async (req: AuthRequest, res) => {
         priceChangePct24h: 0,
         minBaseAmount: product.minOrderSize,
         minQuoteAmount: product.minOrderSize * (product.lastPrice || 1),
+      });
+
+      return res.json({ ...result, availableBalance: undefined });
+    }
+
+    // ─── GRVT branch ───────────────────────────────────────────────────────────
+    if (isGrvt) {
+      const creds = await getGrvtCredentials(req.userId!).catch(() => null);
+      const network: GrvtNetwork = (creds?.grvtNetwork === "testnet") ? "testnet" : "mainnet";
+
+      const instrument = await getInstrumentByName(marketSymbol!.trim(), network);
+      if (!instrument) {
+        return res.status(404).json({ error: `Market GRVT '${marketSymbol}' tidak ditemukan` });
+      }
+
+      const ticker = await getMiniTicker(instrument.instrument, network);
+      const lastPrice = ticker ? parseFloat(ticker.mark_price || ticker.close || "0") : 0;
+      const high24h = ticker ? parseFloat(ticker.high || "0") : 0;
+      const low24h = ticker ? parseFloat(ticker.low || "0") : 0;
+      const volume24h = ticker ? parseFloat(ticker.volume || "0") : 0;
+      const open = ticker ? parseFloat(ticker.open || "0") : 0;
+      const priceChangePct = open > 0 && lastPrice > 0 ? ((lastPrice - open) / open) * 100 : 0;
+      const minSize = parseFloat(instrument.min_size || "0.001");
+
+      const result = await analyzeMarketForStrategy(strategyType, {
+        exchange: "grvt",
+        symbol: instrument.instrument,
+        type: "perp",
+        lastPrice,
+        high24h,
+        low24h,
+        volume24h,
+        priceChangePct24h: priceChangePct,
+        minBaseAmount: minSize,
+        minQuoteAmount: minSize * (lastPrice || 1),
       });
 
       return res.json({ ...result, availableBalance: undefined });

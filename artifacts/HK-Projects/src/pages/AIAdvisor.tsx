@@ -27,7 +27,7 @@ import { Link } from "wouter";
 import { ExchangeLogo } from "@/components/ui/ExchangeLogo";
 
 type StrategyType = "dca" | "grid";
-type DexType = "lighter" | "extended" | "ethereal";
+type DexType = "lighter" | "extended" | "ethereal" | "grvt";
 type MarketCondition = "bullish" | "bearish" | "sideways" | "volatile";
 type RiskLevel = "low" | "medium" | "high";
 
@@ -144,6 +144,18 @@ function DexSelector({ selected, onChange }: { selected: DexType; onChange: (d: 
           <ExchangeLogo exchange="ethereal" size={14} />
           Ethereal
         </button>
+        <button
+          type="button"
+          onClick={() => onChange("grvt")}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all duration-150 flex-1 justify-center ${
+            selected === "grvt"
+              ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-400"
+              : "bg-background border-border text-muted-foreground hover:border-cyan-500/30 hover:text-foreground"
+          }`}
+        >
+          <ExchangeLogo exchange="grvt" size={14} />
+          GRVT
+        </button>
       </div>
     </div>
   );
@@ -159,6 +171,8 @@ export default function AIAdvisor() {
   const [extMarketsLoading, setExtMarketsLoading] = useState(false);
   const [etherealMarkets, setEtherealMarkets] = useState<{ id: string; ticker: string; displayTicker: string }[]>([]);
   const [ethMarketsLoading, setEthMarketsLoading] = useState(false);
+  const [grvtMarkets, setGrvtMarkets] = useState<{ instrument: string; base: string; quote: string }[]>([]);
+  const [grvtMarketsLoading, setGrvtMarketsLoading] = useState(false);
 
   useEffect(() => {
     setExtMarketsLoading(true);
@@ -174,20 +188,28 @@ export default function AIAdvisor() {
       .then(data => setEtherealMarkets(data ?? []))
       .catch(() => setEtherealMarkets([]))
       .finally(() => setEthMarketsLoading(false));
+
+    setGrvtMarketsLoading(true);
+    fetch("/api/grvt/strategies/markets", { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((data: any[]) => setGrvtMarkets(Array.isArray(data) ? data : []))
+      .catch(() => setGrvtMarkets([]))
+      .finally(() => setGrvtMarketsLoading(false));
   }, []);
 
   const [selectedDex, setSelectedDex] = useState<DexType>("lighter");
   const [selectedLighterIndex, setSelectedLighterIndex] = useState<string>("");
   const [selectedExtSymbol, setSelectedExtSymbol] = useState<string>("");
   const [selectedEthTicker, setSelectedEthTicker] = useState<string>("");
+  const [selectedGrvtInstrument, setSelectedGrvtInstrument] = useState<string>("");
   const [strategyType, setStrategyType] = useState<StrategyType>("grid");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AIResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Apakah market sudah dipilih (untuk semua DEX)
   const hasMarketSelected = selectedDex === "lighter" ? !!selectedLighterIndex
     : selectedDex === "extended" ? !!selectedExtSymbol
+    : selectedDex === "grvt" ? !!selectedGrvtInstrument
     : !!selectedEthTicker;
 
   const handleDexChange = (dex: DexType) => {
@@ -197,6 +219,7 @@ export default function AIAdvisor() {
     setSelectedLighterIndex("");
     setSelectedExtSymbol("");
     setSelectedEthTicker("");
+    setSelectedGrvtInstrument("");
   };
 
   const handleAnalyze = async () => {
@@ -209,8 +232,10 @@ export default function AIAdvisor() {
       const body = selectedDex === "lighter"
         ? { strategyType, marketIndex: Number(selectedLighterIndex) }
         : selectedDex === "extended"
-        ? { strategyType, marketSymbol: selectedExtSymbol }
-        : { strategyType, marketSymbol: selectedEthTicker };
+        ? { strategyType, marketSymbol: selectedExtSymbol, exchange: "extended" }
+        : selectedDex === "ethereal"
+        ? { strategyType, marketSymbol: selectedEthTicker, exchange: "ethereal" }
+        : { strategyType, marketSymbol: selectedGrvtInstrument, exchange: "grvt" };
 
       const res = await fetch("/api/ai/analyze", {
         method: "POST",
@@ -294,6 +319,20 @@ export default function AIAdvisor() {
                         {m.baseAsset && (
                           <span className="ml-2 text-xs text-muted-foreground">{m.baseAsset}</span>
                         )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : selectedDex === "grvt" ? (
+                <Select value={selectedGrvtInstrument} onValueChange={(v) => { setSelectedGrvtInstrument(v); setResult(null); }}>
+                  <SelectTrigger className="bg-background border-border/60">
+                    <SelectValue placeholder={grvtMarketsLoading ? "Memuat pasar..." : grvtMarkets.length === 0 ? "Tidak ada market" : "Pilih market GRVT..."} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    {grvtMarkets.map(m => (
+                      <SelectItem key={m.instrument} value={m.instrument}>
+                        <span className="font-mono">{m.instrument}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{m.base}/{m.quote}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -498,10 +537,10 @@ export default function AIAdvisor() {
 
           {/* CTA — link ke halaman strategi yang sesuai DEX */}
           <div className="flex flex-col sm:flex-row gap-3">
-            <Link href={selectedDex === "extended" ? "/extended" : selectedDex === "ethereal" ? "/ethereal" : "/lighter"}>
+            <Link href={selectedDex === "extended" ? "/extended" : selectedDex === "ethereal" ? "/ethereal" : selectedDex === "grvt" ? "/grvt" : "/lighter"}>
               <Button className="w-full sm:w-auto gap-2" variant="default">
                 <Bot className="w-4 h-4" />
-                Buat Strategi {selectedDex === "extended" ? "Extended" : "Lighter"} Baru
+                Buat Strategi {selectedDex === "extended" ? "Extended" : selectedDex === "ethereal" ? "Ethereal" : selectedDex === "grvt" ? "GRVT" : "Lighter"} Baru
                 <ChevronRight className="w-4 h-4" />
               </Button>
             </Link>

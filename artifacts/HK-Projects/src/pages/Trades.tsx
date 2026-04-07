@@ -47,12 +47,28 @@ function StatusText({ status }: { status: string }) {
   );
 }
 
+type ExchangeFilter = "all" | "lighter" | "extended" | "ethereal" | "grvt";
+
+const EXCHANGE_OPTIONS: { value: ExchangeFilter; label: string }[] = [
+  { value: "all", label: "Semua DEX" },
+  { value: "lighter", label: "Lighter" },
+  { value: "extended", label: "Extended" },
+  { value: "ethereal", label: "Ethereal" },
+  { value: "grvt", label: "GRVT" },
+];
+
 export default function Trades() {
   const [limit, setLimit] = useState(50);
+  const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilter>("all");
   const { data, isLoading } = useGetTradeHistory(
     { limit },
     { query: { queryKey: getGetTradeHistoryQueryKey({ limit }), refetchInterval: 10000 } }
   );
+
+  const trades = (data?.trades ?? []).filter((t) => {
+    if (exchangeFilter === "all") return true;
+    return (t.exchange ?? "lighter") === exchangeFilter;
+  });
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -64,7 +80,18 @@ export default function Trades() {
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">Log lengkap order yang dieksekusi dan tertunda</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-muted-foreground">DEX:</span>
+          <Select value={exchangeFilter} onValueChange={(v) => setExchangeFilter(v as ExchangeFilter)}>
+            <SelectTrigger className="w-36 bg-card">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EXCHANGE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <span className="text-sm text-muted-foreground">Tampilkan:</span>
           <Select value={limit.toString()} onValueChange={(v) => setLimit(parseInt(v))}>
             <SelectTrigger className="w-24 bg-card">
@@ -90,7 +117,7 @@ export default function Trades() {
               </CardContent>
             </Card>
           ))
-        ) : !data?.trades.length ? (
+        ) : !trades.length ? (
           <Card className="glass-panel">
             <CardContent className="py-12 flex flex-col items-center text-center gap-3">
               <ReceiptText className="w-12 h-12 text-muted-foreground opacity-20" />
@@ -99,7 +126,7 @@ export default function Trades() {
             </CardContent>
           </Card>
         ) : (
-          data.trades.map((trade) => (
+          trades.map((trade) => (
             <Card key={trade.id} className="glass-panel overflow-hidden">
               <CardContent className="p-3">
                 {/* Row 1: Market + Side + Status */}
@@ -183,7 +210,7 @@ export default function Trades() {
                       <TableCell className="text-right"><div className="h-4 w-16 bg-muted animate-pulse rounded ml-auto" /></TableCell>
                     </TableRow>
                   ))
-                ) : !data?.trades.length ? (
+                ) : !trades.length ? (
                   <TableRow>
                     <TableCell colSpan={7} className="h-48 text-center">
                       <div className="flex flex-col items-center gap-3">
@@ -194,7 +221,7 @@ export default function Trades() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  data.trades.map((trade) => (
+                  trades.map((trade) => (
                     <TableRow key={trade.id} className="border-border/50 hover:bg-muted/30 transition-colors">
                       <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
                         {formatWIBDateTime(trade.executedAt || trade.createdAt)}
